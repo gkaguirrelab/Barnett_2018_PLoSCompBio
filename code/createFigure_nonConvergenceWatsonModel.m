@@ -1,35 +1,18 @@
-function [ displacementMapDeg, meridianAngles, rgcDisplacementEachMeridian, mRGC_cumulativeEachMeridian, mRF_cumulativeEachMeridian ] = createFigure_nonConvergenceWatsonModel( varargin )
-% watsonConvergeDemo( varargin )
+function createFigure_nonConvergenceWatsonModel( varargin )
+% createFigure_nonConvergenceWatsonModel( varargin )
 %
-% This is a modification of the primary routine (makeDisplacmenMap) that
-% has as its purpose an illustration of the inability of the standard
-% Watson equations to produce a well-structure displacement map
-%
-%
-% OUTPUT
-%   displacementMapDeg - The map of RGC radial displacement, in Cartesian
-%       coordinates.
-%   meridianAngles - a vector of polar angle values (in degrees) for which
-%       the displacement values were calculated
+% This routine examines the performance of the Watson 2014 equations
+% when applied to the Drasdo 2007 model for calculating the radial
+% displacement of retinal ganglion cells.
 %
 % OPTIONS
-%   sampleResolutionDegrees, maxModeledEccentricity - The calculations are
-%       performed across a regular sampling of eccentricity. These params
-%       deine sample resolution and the max modeled eccentricity. We
-%       note that the sample resolution must be sufficient fine so that the
-%       cumulative is an accurate estimate of the integral. Further, we
-%       find that our results depend in unpredictable ways on the
-%       particular maxModeledEccentricity selected. This latter value must
-%       be sufficiently outside the displacement zone so that there is a
-%       portion of the cumulative to match between the mRF and mRGC
-%       functions, but not so large as to venture into the periphery where
-%       our transform models areless accurate
-%   targetDisplacementPointDeg - This is point in degrees at which
-%       displacement should become zero for each cadinal meridian
+%   sampleResolutionDegrees - The calculations are performed across a
+%       regular sampling of eccentricity. This param defines sample
+%       resolution. The sample resolution must be sufficient fine so that
+%       the cumulative is an accurate estimate of the integral.
+%   maxModeledEccentricity - The eccentricity extent of the model.
 %   meridianAngleResolutionDeg - The resolution across polar angle for
 %       which displacements are calculated.
-%   displacementMapPixelsPerDeg - The resolution in pixels per degree at
-%       which the displacement map is rendered.
 %   verbose - Do we give you the text?
 %   makePlots - Do we make a figure?
 
@@ -39,12 +22,12 @@ p = inputParser;
 % Optional anaysis params
 p.addParameter('sampleResolutionDegrees',0.01,@isnumeric);
 p.addParameter('maxModeledEccentricity',30,@isnumeric);
-p.addParameter('cardinalMeridianAngles',[0 90 180 270],@isnumeric);
 p.addParameter('meridianAngleResolutionDeg',90,@isnumeric);
-p.addParameter('displacementMapPixelsPerDeg',10,@isnumeric);
 
-% Optional display params
+% Optional display and ouput params
 p.addParameter('verbose',true,@islogical);
+p.addParameter('savePlots',true,@islogical);
+p.addParameter('pathToPlotOutputDir','~/Desktop/rgcDisplacementMapPlots',@ischar);
 
 % parse
 p.parse(varargin{:})
@@ -59,6 +42,8 @@ regularSupportPosDeg = ...
 % displacement
 meridianAngles = 0:p.Results.meridianAngleResolutionDeg:(360-p.Results.meridianAngleResolutionDeg);
 
+% Prepare a figure
+figHandle = figure();
 
 %% Loop over the meridians
 for mm = 1:length(meridianAngles)
@@ -73,7 +58,7 @@ for mm = 1:length(meridianAngles)
     
     
     %% mRGC_cumulative function
-    % We build a function that returns the cumulative mRGC density    
+    % We build a function that returns the cumulative mRGC density
     % Obtain a spline fit to the empirical RGC density data of Curcio 1990
     RGCDensityFit = getSplineFitToRGCDensity(meridianAngles(mm));
     % Create a function that returns mRGC density as a function of
@@ -84,7 +69,7 @@ for mm = 1:length(meridianAngles)
         calcDrasdoMidgetFractionByEccen(regularSupportPosDeg,0.8928,41.03);
     % Define the cumulative sum of mRGC density
     mRGC_cumulative = calcCumulative(regularSupportPosDeg, mRGCDensityOverRegularSupport);
-        
+    
     % Calculate and store displacement and cumulative functions
     mRGC_cumulativeEachMeridian(mm,:)=mRGC_cumulative;
     mRF_cumulativeEachMeridian(mm,:)=mRF_cumulative;
@@ -94,23 +79,52 @@ for mm = 1:length(meridianAngles)
     if p.Results.verbose
         zeroPoints = find(rgcDisplacementEachMeridian(mm,:)==0);
         convergenceIdx = find(regularSupportPosDeg(zeroPoints) > 2,1);
-        convergenceEccen = regularSupportPosDeg(zeroPoints(convergenceIdx));
-        outLine = ['Polar angle: ' num2str(meridianAngles(mm)) ', max RGC displacement: ' num2str(max(rgcDisplacementEachMeridian(mm,:))) ', found convergence: ' num2str(convergenceEccen) '\n'];
-        fprintf(outLine);
+        if isempty(convergenceIdx)
+            outLine = ['Polar angle: ' num2str(meridianAngles(mm)) ', max RGC displacement: ' num2str(max(rgcDisplacementEachMeridian(mm,:))) ', found convergence: FAILED TO CONVERGE\n'];
+            fprintf(outLine);
+        else
+            convergenceEccen(mm) = regularSupportPosDeg(zeroPoints(convergenceIdx));
+            outLine = ['Polar angle: ' num2str(meridianAngles(mm)) ', max RGC displacement: ' num2str(max(rgcDisplacementEachMeridian(mm,:))) ', found convergence: ' num2str(convergenceEccen(mm)) '\n'];
+            fprintf(outLine);
+        end
     end
+    
+    % plot the displacement
+    subplot(length(meridianAngles),2,mm*2);
+    plot(regularSupportPosDeg,rgcDisplacementEachMeridian(mm,:),'-r')
+    axis off;
+    ylim([-.5 3.0]);
+    if mm == length(meridianAngles)
+        axis on;
+        xlabel('eccentricity [deg]');
+        ylabel('RGC displacement [deg]');
+    end
+    
+    % Plot the cumulative functions
+    subplot(length(meridianAngles),2,mm*2-1);
+    plot(regularSupportPosDeg,mRGC_cumulativeEachMeridian(mm,:),'-k')
+    axis off;
+    if mm == length(meridianAngles)
+        axis on;
+        xlabel('eccentricity [deg]');
+        ylabel('cells per sector');
+    end
+    hold on
+    plot(regularSupportPosDeg,mRF_cumulativeEachMeridian(mm,:),'-b')
+    ylim([0 8e5]);
+    hold off
+    drawnow
     
 end % loop over meridians
 
-% Create the displacement map
-imRdim = p.Results.maxModeledEccentricity * p.Results.displacementMapPixelsPerDeg * 2;
-maxDisplacementDeg = max(rgcDisplacementEachMeridian(:));
-imP=rgcDisplacementEachMeridian'./maxDisplacementDeg;
-imR = PolarToIm (imP, 0, 1, imRdim, imRdim);
-displacementMapDeg = imrotate(imR .* maxDisplacementDeg,-90);
+if p.Results.savePlots
+    fileOutPath = fullfile(p.Results.pathToPlotOutputDir,'TestWatsonConvergence.pdf');
+    saveas(figHandle,fileOutPath)
+    close(figHandle);
+end
 
 
-
-end % watsonConvergeDemo
+end % createFigure_nonConvergenceWatsonModel
 
 
 %% LOCAL FUNCTIONS
